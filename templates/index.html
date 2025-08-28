@@ -1,0 +1,24 @@
+
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header><h1>{{ title }}</h1></header>
+    <main>
+      <div id="log" role="log" aria-live="polite"></div>
+      <form id="f">
+        <input id="txt" type="text" maxlength="{{ maxlen }}" placeholder="Écrire un message… (Entrée pour envoyer)" autocomplete="off">
+        <button type="submit">Envoyer</button>
+      </form>
+      <p class="hint">VPS · Hash anonyme par message · Historique: {{ maxmsgs }} derniers messages.</p>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
