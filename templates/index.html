@@ -6,23 +6,79 @@
   <title>{{ title }}</title>
   <link rel="stylesheet" href="/static/style.css">
   <style>
+    :root{ --cell: 26px; }
+
+    /* Tabs */
     .tabs{display:flex;gap:8px;margin-top:8px}
     .tab{background:#1a1b20;color:#e6e6e6;border:1px solid #2a2d39;border-radius:10px;padding:6px 10px;cursor:pointer}
     .tab.active{outline:2px solid var(--accent)}
+
+    /* Show/hide panes */
     .form{display:none;gap:8px;align-items:center;margin-top:8px}
     .form.on{display:flex}
-    .pre-art{font-family: ui-monospace,monospace; white-space: pre; padding:8px; border:1px solid #2a2d39; border-radius:10px; background:#0f1116}
-    .grid { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; user-select: none; margin-top:8px; touch-action: none; }
-    .cell { font-family: ui-monospace,monospace; background:#0f1116; border:1px solid #2a2d39; border-radius:6px; width: 28px; height: 28px; display:flex; align-items:center; justify-content:center; cursor:crosshair }
-    .cell:hover{ outline:1px solid var(--accent) }
-    .bar{ display:flex; gap:12px; align-items:center; margin-top:8px; flex-wrap: wrap; }
-    .hash{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid #263040;background:#0e111a}
+
+    /* FEED (en haut) */
+    #log{margin-top:8px}
+
+    /* Zone dessin compacte (même espace: palette → grille → publier) */
+    .draw-stack{display:flex;flex-direction:column;gap:8px;width:100%}
+
+    /* Palette en haut (scrollable horizontal sur mobile) */
+    .toolbar{display:flex;flex-direction:column;gap:8px}
+    .palette{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding:4px 2px}
+    .swatch{
+      min-width:28px;min-height:28px;
+      display:flex;align-items:center;justify-content:center;
+      border:0;border-radius:6px;
+      background:#15171e;cursor:pointer;
+      font-family:ui-monospace,monospace;
+      color:#fff;                 /* caractères de la palette en BLANC */
+    }
+    .swatch.active{outline:2px solid var(--accent)}
+
+    .tools{display:flex;gap:8px;flex-wrap:wrap}
     .pill{background:#1a1b20;border:1px solid #2a2d39;border-radius:10px;padding:6px 10px}
     .btn{background:var(--accent);color:#001018;border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
     .btn.secondary{background:#1a1b20;color:#e6e6e6;border:1px solid #2a2d39}
-    .palette{display:flex;gap:6px;flex-wrap:wrap}
-    .swatch{min-width:28px;min-height:28px;display:flex;align-items:center;justify-content:center;border:1px solid #2a2d39;border-radius:8px;background:#15171e;cursor:pointer;font-family:ui-monospace,monospace}
-    .swatch.active{outline:2px solid var(--accent)}
+
+    /* === Grille pixel-art collée (pas de gap ni bordures) === */
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(24, var(--cell));
+      grid-auto-rows: var(--cell);
+      gap:0;              /* collé */
+      padding:0;
+      user-select:none;
+      touch-action:none;
+      background:transparent;
+      box-sizing:content-box;
+      overflow:visible;
+    }
+    .cell{
+      width:var(--cell); height:var(--cell);
+      border:0; border-radius:0; padding:0; background:transparent;
+      color:#e6e6e6;
+      display:flex; align-items:center; justify-content:center;
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      font-size:calc(var(--cell) - 6px);  /* évite le clipping des glyphes */
+      line-height:1; letter-spacing:0; overflow:visible;
+      text-rendering:geometricPrecision;
+      -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+    }
+
+    /* === Rendu des œuvres dans le feed : pixel-art collé, identique à l’éditeur === */
+    .pre-art{
+      margin:0; padding:0; border:0; background:transparent;
+      font-family:ui-monospace,Menlo,Consolas,monospace;
+      font-size:16px;        /* ajuste si tu veux */
+      line-height:1;         /* aucun leading => lignes collées */
+      letter-spacing:0;
+      white-space:pre;       /* respecte \n et espaces */
+      display:inline-block;  /* neutralise les effets de ligne autour */
+      text-rendering:geometricPrecision;
+      -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+    }
+    .msg > .meta { margin-bottom:4px; }
   </style>
 </head>
 <body>
@@ -30,36 +86,39 @@
     <header>
       <h1>{{ title }}</h1>
       <nav class="tabs">
-        <button data-chan="discussion" class="tab active" type="button">Picochan</button>
-        <button data-chan="dessin" class="tab" type="button">Paintsource</button>
+        <button data-chan="discussion" class="tab active" type="button">Discussion</button>
+        <button data-chan="dessin" class="tab" type="button">Dessin 24×8</button>
       </nav>
     </header>
 
     <main>
-      <!-- Fil (en haut) -->
+      <!-- FEED (tout en haut) -->
       <div id="log" role="log" aria-live="polite"></div>
 
-      <!-- Pane DESSIN : outils + grille + publier (publier juste sous la zone) -->
+      <!-- ZONE DESSIN : palette → grille → publier (même espace) -->
       <section id="dessin-pane" class="form">
-        <div class="bar">
-          <label class="pill">Caractère :
-            <!-- largeur un peu plus grande pour gérer les emojis/IME ; on tronque côté JS -->
-            <input id="brush" type="text" value="#" maxlength="4" style="width:3.6ch;text-align:center">
-          </label>
-          <div id="palette" class="palette" aria-label="Palette de caractères"></div>
-          <button id="eraser" type="button" class="btn secondary">Gomme : OFF</button>
-          <button id="clear"  type="button" class="btn secondary">Effacer tout</button>
-        </div>
+        <div class="draw-stack">
+          <div class="toolbar">
+            <div class="palette" id="palette" aria-label="Palette de caractères"></div>
+            <div class="tools">
+              <label class="pill">Caractère :
+                <input id="brush" type="text" value="#" maxlength="4" style="width:3.6ch;text-align:center">
+              </label>
+              <button id="eraser" type="button" class="btn secondary">Gomme : OFF</button>
+              <button id="clear"  type="button" class="btn secondary">Effacer tout</button>
+            </div>
+          </div>
 
-        <div id="grid" class="grid" aria-label="Éditeur 24x8"></div>
+          <div id="grid" class="grid" aria-label="Éditeur 24x8"></div>
 
-        <div class="bar">
-          <button id="publish" type="button" class="btn">Publier le canvas dans le fil</button>
-          <span class="pill" id="hint-key">Astuce : maintiens une touche (ex: *) pour dessiner temporairement en *.</span>
+          <div class="tools">
+            <button id="publish" type="button" class="btn">Publier le canvas dans le fil</button>
+            <span class="pill">Astuce : maintiens une touche (ex: *) pour dessiner temporairement en *.</span>
+          </div>
         </div>
       </section>
 
-      <!-- Pane DISCUSSION : zone d'entrée en bas -->
+      <!-- DISCUSSION : zone d’entrée en bas -->
       <form id="f-discussion" class="form on">
         <input id="txt" type="text" maxlength="{{ maxlen }}" placeholder="Écrire un message… (Entrée pour envoyer)" autocomplete="off">
         <input type="hidden" name="chan" value="discussion">
@@ -70,6 +129,7 @@
     </main>
   </div>
 
-  <script src="/static/app.js"></script>
+  <!-- Cache-bust pour charger la dernière version du JS -->
+  <script src="/static/app.js?v=pixel-mobile-2"></script>
 </body>
 </html>
