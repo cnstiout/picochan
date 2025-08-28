@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="fr">
 <head>
@@ -6,19 +5,71 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
   <title>{{ title }}</title>
   <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .tabs{display:flex;gap:8px;margin-top:8px}
+    .tab{background:#1a1b20;color:#e6e6e6;border:1px solid #2a2d39;border-radius:10px;padding:6px 10px;cursor:pointer}
+    .tab.active{outline:2px solid var(--accent)}
+    .form{display:none;gap:8px;align-items:center;margin-top:8px}
+    .form.on{display:flex}
+    .pre-art{font-family: ui-monospace,monospace; white-space: pre; padding:8px; border:1px solid #2a2d39; border-radius:10px; background:#0f1116}
+    .grid { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; user-select: none; margin-top:8px; touch-action: none; }
+    .cell { font-family: ui-monospace,monospace; background:#0f1116; border:1px solid #2a2d39; border-radius:6px; width: 28px; height: 28px; display:flex; align-items:center; justify-content:center; cursor:crosshair }
+    .cell:hover{ outline:1px solid var(--accent) }
+    .bar{ display:flex; gap:12px; align-items:center; margin-top:8px; flex-wrap: wrap; }
+    .hash{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:2px 6px;border-radius:6px;border:1px solid #263040;background:#0e111a}
+    .pill{background:#1a1b20;border:1px solid #2a2d39;border-radius:10px;padding:6px 10px}
+    .btn{background:var(--accent);color:#001018;border:0;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}
+    .btn.secondary{background:#1a1b20;color:#e6e6e6;border:1px solid #2a2d39}
+    .palette{display:flex;gap:6px;flex-wrap:wrap}
+    .swatch{min-width:28px;min-height:28px;display:flex;align-items:center;justify-content:center;border:1px solid #2a2d39;border-radius:8px;background:#15171e;cursor:pointer;font-family:ui-monospace,monospace}
+    .swatch.active{outline:2px solid var(--accent)}
+  </style>
 </head>
 <body>
   <div class="wrap">
-    <header><h1>{{ title }}</h1></header>
+    <header>
+      <h1>{{ title }}</h1>
+      <nav class="tabs">
+        <button data-chan="discussion" class="tab active" type="button">Picochan</button>
+        <button data-chan="dessin" class="tab" type="button">Paintsource</button>
+      </nav>
+    </header>
+
     <main>
+      <!-- Fil (en haut) -->
       <div id="log" role="log" aria-live="polite"></div>
-      <form id="f">
+
+      <!-- Pane DESSIN : outils + grille + publier (publier juste sous la zone) -->
+      <section id="dessin-pane" class="form">
+        <div class="bar">
+          <label class="pill">Caractère :
+            <!-- largeur un peu plus grande pour gérer les emojis/IME ; on tronque côté JS -->
+            <input id="brush" type="text" value="#" maxlength="4" style="width:3.6ch;text-align:center">
+          </label>
+          <div id="palette" class="palette" aria-label="Palette de caractères"></div>
+          <button id="eraser" type="button" class="btn secondary">Gomme : OFF</button>
+          <button id="clear"  type="button" class="btn secondary">Effacer tout</button>
+        </div>
+
+        <div id="grid" class="grid" aria-label="Éditeur 24x8"></div>
+
+        <div class="bar">
+          <button id="publish" type="button" class="btn">Publier le canvas dans le fil</button>
+          <span class="pill" id="hint-key">Astuce : maintiens une touche (ex: *) pour dessiner temporairement en *.</span>
+        </div>
+      </section>
+
+      <!-- Pane DISCUSSION : zone d'entrée en bas -->
+      <form id="f-discussion" class="form on">
         <input id="txt" type="text" maxlength="{{ maxlen }}" placeholder="Écrire un message… (Entrée pour envoyer)" autocomplete="off">
-        <button type="submit">Envoyer</button>
+        <input type="hidden" name="chan" value="discussion">
+        <button type="submit" class="btn">Envoyer</button>
       </form>
-      <p class="hint">VPS · Hash anonyme par message · Historique: {{ maxmsgs }} derniers messages.</p>
+
+      <p class="hint">Historique : {{ maxmsgs }} derniers messages par channel.</p>
     </main>
   </div>
+
   <script src="/static/app.js"></script>
 </body>
 </html>
