@@ -1,16 +1,13 @@
+# app.py — Pico-Chan VPS (parité Pico, dédoublonnage + couleur par auteur)
+# FastAPI + SSE, messages: {id, ts, text, hash, color}
+# Diff vs version précédente:
+#  - /stream: SUPPRIME l’envoi d’historique (plus de doublons avec /poll)
+#  - Ajoute un champ "color" déterministe par hash
+#  - /poll et SSE renvoient toujours la même forme de message
 
-# app.py — Pico-Chan VPS (parité Pico)
-# FastAPI + SSE. Schéma message: {id, ts, text, hash}
-# Env:
-#   PICOCHAN_SECRET_SALT="pc/sel-🌊-2025"
-#   PICOCHAN_HASH_ROTATE_DAILY="1" (ou "0")
-#   PICOCHAN_POST_COOLDOWN="1.0"
-#   PICOCHAN_MAX_MSGS="512"
-# Run dev: uvicorn app:app --reload --port 8080
-
-import os, time, asyncio, hashlib
+import os, time, asyncio, hashlib, math, json as _json
 from collections import deque
-from typing import Deque, Dict, Any, List, Optional
+from typing import Deque, Dict, Any, List
 
 from fastapi import FastAPI, Request, HTTPException, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -43,7 +40,6 @@ def now_s() -> int:
     return int(time.time())
 
 def client_ip(request: Request) -> str:
-    # X-Forwarded-For (trust your reverse proxy)
     xff = request.headers.get("x-forwarded-for")
     if xff:
         return xff.split(",")[0].strip()
@@ -53,7 +49,41 @@ def anon_hash_for_ip(ip: str, t: int) -> str:
     day_bucket = (t // 86400) if HASH_ROTATE_DAILY else 0
     payload = f"{ip}|{SECRET_SALT}|{day_bucket}".encode()
     hx = hashlib.sha1(payload).hexdigest()[:6].upper()
-    return hx
+    return hx  # 6 hex chars
+
+# ---- Couleur déterministe depuis le hash (HSL -> HEX) ----
+def hsl_to_rgb(h, s, l):
+    # h=0..360, s,l = 0..1 ; retourne tuple (r,g,b) 0..255
+    c = (1 - abs(2*l - 1)) * s
+    hp = (h / 60.0) % 6
+    x = c * (1 - abs(hp % 2 - 1))
+    r1=g1=b1=0
+    if   0 <= hp < 1: r1,g1,b1 = c,x,0
+    elif 1 <= hp < 2: r1,g1,b1 = x,c,0
+    elif 2 <= hp < 3: r1,g1,b1 = 0,c,x
+    elif 3 <= hp < 4: r1,g1,b1 = 0,x,c
+    elif 4 <= hp < 5: r1,g1,b1 = x,0,c
+    elif 5 <= hp < 6: r1,g1,b1 = c,0,x
+    m = l - c/2
+    r = int((r1 + m) * 255 + 0.5)
+    g = int((g1 + m) * 255 + 0.5)
+    b = int((b1 + m) * 255 + 0.5)
+    return r,g,b
+
+def color_from_hash(hx6: str) -> str:
+    """
+    Couleur stable par "personne": on tire la teinte depuis le hash,
+    saturation/lumière fixes pour rester lisible (pastel-ish).
+    """
+    try:
+        n = int(hx6, 16)  # 0..0xFFFFFF
+    except Exception:
+        n = 0x123456
+    hue = (n % 360)                  # 0..359
+    sat = 0.58                       # 58% (bonne lisibilité)
+    lig = 0.58                       # 58%
+    r,g,b = hsl_to_rgb(hue, sat, lig)
+    return f"#{r:02X}{g:02X}{b:02X}"
 
 def active_clients_count() -> int:
     t = now_s()
@@ -64,10 +94,10 @@ def active_clients_count() -> int:
 
 def push_message(text: str, h: str):
     global _next_id
-    msg = {"id": _next_id, "ts": now_s(), "text": text, "hash": h}
+    msg = {"id": _next_id, "ts": now_s(), "text": text, "hash": h, "color": color_from_hash(h)}
     _next_id += 1
     _messages.append(msg)
-    # fanout SSE
+    # fanout SSE (live uniquement, pas d’historique)
     for q in list(_subscribers):
         try:
             q.put_nowait(msg)
@@ -83,6 +113,8 @@ def get_since(last_id: int) -> List[Dict[str, Any]]:
             if len(out) >= POLL_BATCH:
                 break
     return out
+
+def jdump(o): return _json.dumps(o, separators=(",",":"))
 
 # --------------------------
 # App / routes
@@ -120,10 +152,8 @@ async def poll(request: Request, last_id: int = 0):
 async def post_msg(request: Request, text: str = Form(...)):
     ip = client_ip(request)
     tnow = time.time()
-    # mark active
     _clients[ip] = now_s()
 
-    # rate limit
     last = _last_post.get(ip, 0.0)
     if (tnow - last) < POST_COOLDOWN:
         raise HTTPException(status_code=429, detail="slow down")
@@ -137,11 +167,11 @@ async def post_msg(request: Request, text: str = Form(...)):
 
     h = anon_hash_for_ip(ip, int(tnow))
     push_message(text, h)
-    # 204 No Content (no body)
-    return JSONResponse(status_code=204, content=None)
+    return JSONResponse(status_code=204, content=None)  # No Content
 
 @app.get("/stream")
 async def stream(request: Request):
+    # IMPORTANT: pas d'historique ici -> évite doublons avec initial poll
     ip = client_ip(request)
     _clients[ip] = now_s()
 
@@ -150,15 +180,12 @@ async def stream(request: Request):
 
     async def event_generator():
         try:
-            # history
-            for m in list(_messages)[-20:]:
-                yield ("data: " + json_dump(m) + "\n\n")
             while True:
                 if await request.is_disconnected():
                     break
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield ("data: " + json_dump(msg) + "\n\n")
+                    yield ("data: " + jdump(msg) + "\n\n")
                 except asyncio.TimeoutError:
                     yield "event: ping\ndata: {}\n\n"
         finally:
@@ -166,8 +193,3 @@ async def stream(request: Request):
                 _subscribers.remove(queue)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-# Tiny JSON (stdlib is fine, keep it compact)
-import json as _json
-def json_dump(obj) -> str:
-    return _json.dumps(obj, separators=(",",":"))
